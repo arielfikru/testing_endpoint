@@ -1,7 +1,7 @@
 import os
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
@@ -11,15 +11,16 @@ from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 
-# Load environment variables
-load_dotenv()
-
-app = FastAPI(title="Anime Website API")
+app = FastAPI(
+    title="Anime Website API",
+    description="Backend API for Anime Streaming Website",
+    version="1.0.0"
+)
 
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Ganti dengan domain frontend Anda di production
+    allow_origins=["*"],  # Dalam production, ganti dengan domain yang spesifik
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,10 +90,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     except jwt.JWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
+@app.get("/")
+async def root():
+    return {
+        "message": "Welcome to Anime Website API",
+        "version": "1.0.0",
+        "docs_url": "/docs",
+        "redoc_url": "/redoc"
+    }
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow()}
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow()
+    }
 
 # Routes
 @app.post("/register", response_model=User)
