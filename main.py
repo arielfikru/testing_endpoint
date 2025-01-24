@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -10,8 +13,21 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
-from dotenv import load_dotenv
-load_dotenv()
+
+# Database Connection Management
+class Database:
+    client: Optional[AsyncIOMotorClient] = None
+    db = None
+
+    @classmethod
+    async def connect_db(cls):
+        cls.client = AsyncIOMotorClient(os.getenv("MONGODB_URL"))
+        cls.db = cls.client.anime_db
+        
+    @classmethod
+    async def close_db(cls):
+        if cls.client is not None:
+            cls.client.close()
 
 app = FastAPI(
     title="Anime Website API",
@@ -28,13 +44,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Konfigurasi Database
-MONGODB_URL = os.getenv("MONGODB_URL")
-if not MONGODB_URL:
-    raise ValueError("MONGODB_URL environment variable is not set")
+# Database Events
+@app.on_event("startup")
+async def startup():
+    await Database.connect_db()
 
-client = AsyncIOMotorClient(MONGODB_URL)
-db = client.anime_db
+@app.on_event("shutdown")
+async def shutdown():
+    await Database.close_db()
 
 # Konfigurasi Security
 SECRET_KEY = os.getenv("SECRET_KEY")
@@ -85,13 +102,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         user_id = payload.get("sub")
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid authentication credentials")
-        user = await db.users.find_one({"_id": ObjectId(user_id)})
+        user = await Database.db.users.find_one({"_id": ObjectId(user_id)})
         if user is None:
             raise HTTPException(status_code=401, detail="User not found")
         return User(id=str(user["_id"]), username=user["username"], email=user["email"])
     except jwt.JWTError:
         raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
+# Routes
 @app.get("/")
 async def root():
     return {
@@ -101,7 +119,6 @@ async def root():
         "redoc_url": "/redoc"
     }
 
-# Health check endpoint
 @app.get("/health")
 async def health_check():
     return {
@@ -109,11 +126,10 @@ async def health_check():
         "timestamp": datetime.utcnow()
     }
 
-# Routes
 @app.post("/register", response_model=User)
 async def register(user: UserCreate):
     # Check if username or email already exists
-    if await db.users.find_one({"$or": [{"username": user.username}, {"email": user.email}]}):
+    if await Database.db.users.find_one({"$or": [{"username": user.username}, {"email": user.email}]}):
         raise HTTPException(status_code=400, detail="Username or email already registered")
     
     # Hash password and create user
@@ -122,7 +138,7 @@ async def register(user: UserCreate):
     user_dict["password"] = hashed_password
     user_dict["created_at"] = datetime.utcnow()
     
-    result = await db.users.insert_one(user_dict)
+    result = await Database.db.users.insert_one(user_dict)
     
     return User(
         id=str(result.inserted_id),
@@ -132,7 +148,7 @@ async def register(user: UserCreate):
 
 @app.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await db.users.find_one({"username": form_data.username})
+    user = await Database.db.users.find_one({"username": form_data.username})
     if not user or not pwd_context.verify(form_data.password, user["password"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -151,9 +167,9 @@ async def create_post(post: PostCreate, current_user: User = Depends(get_current
         "created_at": datetime.utcnow()
     })
     
-    result = await db.posts.insert_one(post_dict)
+    result = await Database.db.posts.insert_one(post_dict)
     
-    created_post = await db.posts.find_one({"_id": result.inserted_id})
+    created_post = await Database.db.posts.find_one({"_id": result.inserted_id})
     return Post(
         id=str(created_post["_id"]),
         title=created_post["title"],
@@ -165,7 +181,7 @@ async def create_post(post: PostCreate, current_user: User = Depends(get_current
 
 @app.get("/posts", response_model=List[Post])
 async def get_posts(skip: int = 0, limit: int = 10):
-    posts = await db.posts.find().skip(skip).limit(limit).to_list(length=limit)
+    posts = await Database.db.posts.find().skip(skip).limit(limit).to_list(length=limit)
     return [
         Post(
             id=str(post["_id"]),
@@ -180,3 +196,7 @@ async def get_posts(skip: int = 0, limit: int = 10):
 # Untuk deployment di Vercel
 def create_app():
     return app
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
