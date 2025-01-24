@@ -10,6 +10,8 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+from dotenv import load_dotenv
+load_dotenv()
 
 app = FastAPI(
     title="Anime Website API",
