@@ -9,8 +9,6 @@ import json
 import os
 from uuid import uuid4
 from dotenv import load_dotenv
-
-# Load environment variables
 load_dotenv()
 
 app = FastAPI(title="Anime Website API")
